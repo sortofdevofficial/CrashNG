@@ -114,3 +114,15 @@ Damage zones per part: `front`, `rear`, `left`, `right`, or none (any hit), gate
 - Parts hang before they fall: once a part passes ~45% of its tear-off load it gets `d.loose` and `updateLoose()` sags/rattles it.
 - Extra parts: crash beams (need nose/bumper gone first), wipers, antenna, tow hooks, control arms (snap when a wheel is wrecked), fenders, quarters, driveshaft, fuel cell (fire).
 - `spawnGlass()` on window/windscreen loss; `crashFX()` adds steam (no radiator) and oil/coolant/fuel puddles; every hit sheds ~0.35% speed per strength point (energy absorbed by crush).
+
+## Ramp areas + terrain (world.js ZONES/terrain, obstacles.js)
+
+- The ramp is 3600 m long and 26 m wide, split into 5 big areas of 720 m: wet meadow (slippery grass), frozen lake (ice + hammers), desert (sand + bounce pads + blades), lava canyon (lava chicane + blades), neon city (oil, conveyor, blades). `AREA_NAMES` shows on entering each.
+- Terrain: `TER` heightmap (60 x ~180 grid) + hills/biome colours + instanced scenery; `gh()` falls back to `terrainH()` off the road, so cars can drive on the terrain and the mesh matches physics.
+- Props are deliberately sparse (about one cluster per 110 m). Desktops default to HIGH graphics (4096 shadows, DPR 2); the resolution scaler still protects slow GPUs.
+
+### Ramp sections (older notes)
+
+- `ZONES` splits the ramp into stretches (asphalt, ice, hammers, lava chicane, sand, oil, conveyor, bounce pads, blades, ice finale); `surfAt(x,z)` says what the tyres are on and `overlay` meshes colour each one.
+- `updateSurface()` (called at the top of `updateCar`) fills `SURF`: ice mu 0.1, oil 0.3, sand drag, lava burns (damage + engine fire), conveyor side push, bounce pads launch the car.
+- `SPIN` = rotating hammers/blades on posts tilted with the ramp; `updateSpinners()` tests arm points against the car box and calls `impactAt()` with the point velocity (omega x r).

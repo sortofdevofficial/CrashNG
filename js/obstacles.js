@@ -86,45 +86,25 @@ const OB=[];
       vel:new THREE.Vector3(),av:new THREE.Vector3(),rx:0,ry:yaw||0,rz:0,
       home:spec.g.position.clone(),homeRy:yaw||0,sleep:true});
   }
-  // deck: a warm-up slalom before the ramp
-  add('tyre',RX-6.2,-30,0);add('tyre',RX+6.2,-31,.4);
+  // deck: just a couple of cones
   add('cone',RX-3.2,-24,0);add('cone',RX+3.4,-27,0);
-  // long descending ramp: cones + drums, alternating sides
-  for(let i=0;i<Math.floor((RL-120)/42);i++){
+  // down the ramp: sparse, roughly every 110 m (nothing in the first stretch)
+  for(let i=0;i<Math.floor((RL-300)/110);i++){
     if(Q.low&&i%2)continue;
-    const z=RZ-80-i*42,side=i%2?1:-1;
-    add('cone',RX+side*3.4,z,0);
-    add('cone',RX-side*2.2,z-7,0);
-    if(i%4===0)add('drum',RX,z-13,0);                 // forces a weave down the middle
-    if(i%6===2)add('crate',RX+(i%2?1.2:-1.2),z-33,rnd()*3);
-    if(i%3===1)add('drum',RX-side*4.4,z-14,0);
-    if(i%4===2)add('tyre',RX+side*5.4,z-20,0);
-    if(i%5===3)add('crate',RX+side*2.8,z-26,rnd()*3);
+    const z=RZ-130-i*110,side=i%2?1:-1;
+    add('cone',RX+side*5,z,0);add('cone',RX-side*3,z-6,0);
+    if(i%3===0)add('drum',RX-side*6,z-14,0);
+    if(i%4===1)add('hay',RX+side*7,z-20,0);
+    if(i%5===2)add('bigcrate',RX,z-30,rnd()*3);
+    if(i%6===3)add('sign',RX+side*10,z-12,0);
   }
-  // landing strip: barrel wall, crate stacks, concrete, scattered debris
+  // landing strip: one barrel wall, a few crates, a bowling lane, a little scatter
   const zb=LZ0-30;
-  for(let i=0;i<9;i++)if(!Q.low||i%2===0)add(i%2?'drum':'drumR',RX-10+i*2.5,zb,0);
-  for(let i=0;i<4;i++)add('crate',RX-6.3+i*4.2,zb-26,rnd()*3);
-  add('block',RX-5,zb-56,.2);add('block',RX+5.5,zb-62,-.2);
-  for(let i=0;i<34;i++){
-    if(Q.low&&i%2)continue;
-    const z=zb-84-rnd()*(SL-330);
-    add(['cone','cone','drum','tyre','crate','hay','sign','pin','bigcrate'][i%9],RX+(rnd()-.5)*29,z,rnd()*3);
-  }
-  for(let i=0;i<22;i++)if(!Q.low||i%2===0)add('cone',RX+(rnd()-.5)*24,zb-110-rnd()*(SL-420),0);
-  // extra: hay-bale chicanes, signposts, crate stacks and bowling pins down the whole ramp
-  for(let i=0;i<Math.floor((RL-160)/36);i++){
-    if(Q.low&&i%2)continue;
-    const z=RZ-110-i*36,side=i%2?1:-1;
-    add('hay',RX+side*4.6,z,0);
-    if(i%3===0)add('sign',RX-side*6.9,z-9,0);
-    if(i%5===1)add('bigcrate',RX-side*2.6,z-17,rnd()*3);
-    if(i%7===3)for(let r=0;r<3;r++)for(let c=0;c<=r;c++)add('pin',RX-1.2+c*.6-r*.3,z-24-r*.55,0);
-  }
-  // landing strip: bowling lane, crate walls, signs
-  for(let r=0;r<4;r++)for(let c=0;c<=r;c++)add('pin',RX-.9+c*.62-r*.31,zb-150-r*.6,0);
-  for(let k=0;k<6;k++){if(Q.low&&k%2)continue;const zz=zb-190-k*130,xx=RX+(k%2?-7:7);for(let c=0;c<5;c++)add(c%2?'crate':'bigcrate',xx-4+c*2.2,zz,rnd()*.5)}
-  for(let k=0;k<12;k++){if(Q.low&&k%2)continue;add('sign',RX+(rnd()-.5)*30,zb-120-rnd()*(SL-250),0)}
+  for(let i=0;i<7;i++)if(!Q.low||i%2===0)add(i%2?'drum':'drumR',RX-8+i*2.7,zb,0);
+  for(let i=0;i<3;i++)add('crate',RX-4+i*4,zb-30,rnd()*3);
+  for(let r=0;r<4;r++)for(let c=0;c<=r;c++)add('pin',RX-.9+c*.62-r*.31,zb-90-r*.6,0);
+  add('block',RX-5,zb-130,.2);add('block',RX+5.5,zb-150,-.2);
+  for(let i=0;i<10;i++){if(Q.low&&i%2)continue;add(['cone','drum','tyre','crate','hay','sign'][i%6],RX+(rnd()-.5)*30,zb-170-rnd()*(SL-400),rnd()*3)}
 }
 function resetObstacles(){
   for(const o of OB){
@@ -275,5 +255,94 @@ function updatePads(dt){
       car.speed=car.vLong=car.vel.x*sx+car.vel.z*cz;car.vLat=car.vel.x*cz-car.vel.z*sx;
       statEl.textContent='BOOST!';return;
     }
+  }
+}
+
+// --- ramp sections: surface physics. physics.js multiplies grip by SURF.mu, adds SURF.roll drag and SURF.side push ---
+const SURF={mu:1,roll:0,side:0,name:'asphalt'};
+let surfCool=0,lavaFx=0;
+function updateSurface(dt){
+  SURF.mu=1;SURF.roll=0;SURF.side=0;
+  let nm='asphalt';
+  if(inCar&&!RP.on&&!car.air){
+    const s=surfAt(car.pos.x,car.pos.z);
+    if(s){
+      nm=s.t;
+      if(s.t==='ice')SURF.mu=.1;
+      else if(s.t==='grass'){SURF.mu=.38;SURF.roll=500}
+      else if(s.t==='oil')SURF.mu=.3;
+      else if(s.t==='sand'){SURF.mu=.72;SURF.roll=9000;if(Math.abs(car.speed)>8&&Math.random()<.5)puff(car.pos.x,car.pos.y,car.pos.z,1,.9,2,0xd9b46a)}
+      else if(s.t==='conveyor')SURF.side=s.s;
+      else if(s.t==='lava'){   // the car burns: damage + engine fire, and the lava drags at the wheels
+        SURF.roll=6000;crash.dmg=Math.min(100,crash.dmg+7*dt);crash.eng=Math.min(1,crash.eng+.16*dt);
+        lavaFx-=dt;if(lavaFx<=0){lavaFx=.07;puff(car.pos.x,car.pos.y+.2,car.pos.z,1,.8,2.2,0xff6a18)}
+      }else if(s.t==='bounce'&&surfCool<=0){car.vy=20;car.pos.y+=.35;car.air=true;car.airT=0;car.from.copy(car.pos);surfCool=1.2}
+    }
+  }
+  if(surfCool>0)surfCool-=dt;
+  if(nm!==SURF.name){
+    SURF.name=nm;
+    const msg={grass:'WET GRASS — slippery!',ice:'ICE — almost no grip!',oil:'OIL SLICK — careful!',sand:'SAND — it drags you down',lava:'LAVA! Get off it!',conveyor:'CONVEYOR — pushed sideways',bounce:'BOUNCE PAD!'}[nm];
+    if(msg)statEl.textContent=msg;
+  }
+  const q=zoneAt(car.pos.z),ai=q&&inCar?Math.min(4,Math.floor((RZ-car.pos.z)/720)):-1;
+  if(ai!==updateSurface.ai){updateSurface.ai=ai;if(ai>=0)statEl.textContent='AREA '+(ai+1)+'/5 — '+AREA_NAMES[ai]}
+}
+
+// --- rotating weapons: spinning hammers and blades on posts, tilted to follow the ramp. Hits go through impactAt() ---
+const SPIN=[];
+{
+  const slope=Math.atan((RH-RE)/RL);
+  const steel=new THREE.MeshStandardMaterial({color:0x9aa3ad,metalness:.9,roughness:.3,envMap:ENV,envMapIntensity:.6});
+  const redM=new THREE.MeshStandardMaterial({color:0xd9202a,roughness:.45,metalness:.3});
+  const hazM=new THREE.MeshStandardMaterial({color:0xffc21a,roughness:.5});
+  const postG=new THREE.CylinderGeometry(.3,.4,1.6,10),barG=new THREE.BoxGeometry(1,.22,.22),headG=new THREE.BoxGeometry(1.2,1.0,1.0);
+  const bladeG=new THREE.BoxGeometry(1,.12,.8),toothG=new THREE.BoxGeometry(.18,.2,.3),hubG=new THREE.CylinderGeometry(.45,.45,.5,12);
+  function addSpinner(kind,x,d,speed,len){
+    const z=RZ-d,y=gh(x,z),root=new THREE.Group();root.position.set(x,y,z);scene.add(root);
+    const post=new THREE.Mesh(postG,hazM);post.position.y=.8;post.castShadow=Q.shadow;root.add(post);
+    const pivot=new THREE.Group();pivot.position.y=1.15;pivot.rotation.x=-slope;root.add(pivot);
+    const arm=new THREE.Group();pivot.add(arm);
+    arm.add(new THREE.Mesh(hubG,steel));
+    if(kind==='hammer'){
+      const bar=new THREE.Mesh(barG,steel);bar.scale.x=len*2;arm.add(bar);
+      [-1,1].forEach(sd=>{const h=new THREE.Mesh(headG,redM);h.position.x=sd*len;h.castShadow=Q.shadow;arm.add(h)});
+    }else{
+      const bl=new THREE.Mesh(bladeG,steel);bl.scale.x=len*2;bl.castShadow=Q.shadow;arm.add(bl);
+      for(let i=-5;i<=5;i++)if(i){const t=new THREE.Mesh(toothG,redM);t.position.set(i*len*.19,0,.5);arm.add(t);const t2=t.clone();t2.position.z=-.5;arm.add(t2)}
+    }
+    SPIN.push({root,arm,x,z,len,speed,phase:Math.random()*6,cool:0});
+  }
+  [850,1000,1150,1300].forEach((d,i)=>addSpinner('hammer',RX+(i%2?-4:4),d,(i%2?-1:1)*(1.8+i*.15),8.5));        // frozen lake
+  [1700,1950].forEach((d,i)=>addSpinner('blade',RX,d,(i%2?-1:1)*2.0,9));                                         // desert
+  [2260,2390,2520,2650,2780].forEach((d,i)=>addSpinner('blade',RX+(i%2?-5:5),d,(i%2?-1:1)*(2.2+i*.1),9));      // lava canyon
+  [2950,3080,3200].forEach((d,i)=>addSpinner('hammer',RX+(i-1)*4,d,(i%2?-1:1)*2.1,8.5));                        // neon city: oil
+  [3300,3380,3460,3540].forEach((d,i)=>addSpinner('blade',RX+(i%2?-5:5),d,(i%2?-1:1)*2.6,9));                  // neon city: conveyor
+}
+const _sp=new THREE.Vector3();
+function updateSpinners(dt){
+  const now=performance.now()/1000;
+  for(const s of SPIN){
+    s.arm.rotation.y=s.phase+s.speed*now;
+    const dx=s.x-car.pos.x,dz=s.z-car.pos.z;
+    if(!inCar||RP.on||dx*dx+dz*dz>3600)continue;   // only test the spinners near the car
+    if(s.cool>0){s.cool-=dt;continue}
+    s.arm.updateWorldMatrix(true,true);
+    let hit=null;
+    for(const f of [-1,-.78,-.56,-.34,.34,.56,.78,1]){
+      _sp.set(f*s.len,0,0).applyMatrix4(s.arm.matrixWorld);
+      const L=carLocalP(_sp.x,_sp.y,_sp.z);
+      if(Math.abs(L.x)<(PHYS.halfW||1)+.3&&Math.abs(L.z)<(PHYS.halfL||2.4)+.2&&L.y>-.2&&L.y<1.5){hit=_sp.clone();break}
+    }
+    if(!hit)continue;
+    const rx=hit.x-s.x,rz=hit.z-s.z,vx=s.speed*rz,vz=-s.speed*rx,sp=Math.hypot(vx,vz)||1;   // omega x r: velocity of the struck point
+    const rel=Math.hypot(vx-car.vel.x,vz-car.vel.z);
+    if(rel<3)continue;
+    const nx=vx/sp,nz=vz/sp,push=clamp(rel*.3,0,15);
+    car.vel.x+=nx*push;car.vel.z+=nz*push;
+    car.yawRate+=clamp(((hit.x-car.pos.x)*nz-(hit.z-car.pos.z)*nx)*.15,-2,2);
+    impactAt(hit.x,hit.y,hit.z,nx,.15,nz,clamp(rel*.95,6,40),420);
+    s.cool=.5;
+    car.speed=car.vLong=car.vel.x*Math.sin(car.h)+car.vel.z*Math.cos(car.h);car.vLat=car.vel.x*Math.cos(car.h)-car.vel.z*Math.sin(car.h);
   }
 }

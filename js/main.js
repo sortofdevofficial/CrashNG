@@ -25,6 +25,7 @@ function setCar(v){
   inCar=v;root.visible=!v;bCar.firstChild.textContent=v?'Exit car':'Enter car';
   document.getElementById('carName').classList.toggle('on',v);
   document.getElementById('aux').classList.toggle('on',v);
+  document.body.classList.toggle('incar',v);if(window.touchE)touchE.textContent=v?'EXIT':'ENTER';   // touch pad layout follows the seat
   if(v){audioInit();statEl.textContent='W throttle · S brake/reverse · A/D steer · Space handbrake · Shift boost · H horn · L lights · X hazards · N night'}
 }
 // --- vehicle fleet: one is live (physics + crash model), the rest sit parked; walking to one swaps them ---
@@ -152,7 +153,7 @@ function frame(){
   const dt=raw*(crash.slow>0?.35:1);t+=dt;
   if(RP.on)updateReplay(raw);
   else{updateCar(dt);recordFrame(raw)}
-  updateAuto(raw);audioUpdate();updatePads(raw);crashFX(raw);updateLoose(raw);
+  updateAuto(raw);audioUpdate();updatePads(raw);updateSpinners(raw);animateZones(raw);crashFX(raw);updateLoose(raw);
   spdEl.style.opacity=inCar?(clamp((Math.abs(car.speed)*3.6-140)/260,0,1)*.85).toFixed(2):'0';   // speed streaks at the screen edge
   // dynamic resolution: nudge the pixel ratio to hold ~50 fps on any device; shadows only go if even the floor can't cope
   if(!document.hidden){perfT+=raw;perfN++}
@@ -259,22 +260,48 @@ bQual.addEventListener('click',()=>{
   location.reload();
 });
 
-// --- touch: on-screen pad + one-finger drag to look, so it plays on phones/tablets without a keyboard ---
+// --- touch controls: GAS/BRAKE pedals + steer buttons in the car, joystick on foot, handbrake / nitro / jump / enter, fullscreen, pinch zoom ---
 if(Q.touch){
   document.body.classList.add('touch');
-  statEl.textContent='Use the pad to walk/drive · drag the screen to look · tap Enter car near a vehicle';
-  const pad=document.createElement('div');pad.id='tpad';
-  pad.innerHTML='<div class="dp"><b data-k="KeyW">▲</b><b data-k="KeyA">◀</b><b data-k="KeyS">▼</b><b data-k="KeyD">▶</b></div><div class="act"><b data-k="Space">Brake / Jump</b></div>';
-  document.body.appendChild(pad);
-  pad.addEventListener('contextmenu',e=>e.preventDefault());
-  const press=(b,on)=>{keys[b.dataset.k]=on;b.classList.toggle('on',on)};
-  pad.querySelectorAll('b').forEach(b=>{
-    b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture(e.pointerId);press(b,true)});
-    ['pointerup','pointercancel','lostpointercapture'].forEach(n=>b.addEventListener(n,()=>press(b,false)));
+  statEl.textContent='Left stick walks · drag to look · pinch to zoom · tap ENTER next to a vehicle';
+  const mk=(cls,html)=>{const d=document.createElement('div');d.className=cls;d.innerHTML=html;document.body.appendChild(d);d.addEventListener('contextmenu',e=>e.preventDefault());return d};
+  const hold=(el,on,off)=>{   // press-and-hold that survives multi-touch (each finger has its own pointer id)
+    el.addEventListener('pointerdown',e=>{e.preventDefault();el.setPointerCapture(e.pointerId);el.classList.add('on');on()});
+    ['pointerup','pointercancel','lostpointercapture'].forEach(n=>el.addEventListener(n,()=>{if(el.classList.contains('on')){el.classList.remove('on');off()}}));
+  };
+  const key=(code,v)=>{keys[code]=v};
+  const left=mk('tl','<div class="steer"><b id="tL">◀</b><b id="tR">▶</b></div><div class="stick"><i></i></div>');
+  hold(left.querySelector('#tL'),()=>key('KeyA',true),()=>key('KeyA',false));
+  hold(left.querySelector('#tR'),()=>key('KeyD',true),()=>key('KeyD',false));
+  const stick=left.querySelector('.stick'),knob=stick.firstChild;let sid=null,sc=[0,0];
+  const setStick=(dx,dy)=>{
+    const m=Math.hypot(dx,dy),R=52,k=m>R?R/m:1;knob.style.transform='translate('+dx*k+'px,'+dy*k+'px)';
+    const th=18;key('KeyA',dx<-th);key('KeyD',dx>th);key('KeyW',dy<-th);key('KeyS',dy>th);
+  };
+  stick.addEventListener('pointerdown',e=>{e.preventDefault();sid=e.pointerId;stick.setPointerCapture(sid);const r=stick.getBoundingClientRect();sc=[r.left+r.width/2,r.top+r.height/2];setStick(e.clientX-sc[0],e.clientY-sc[1])});
+  stick.addEventListener('pointermove',e=>{if(e.pointerId===sid)setStick(e.clientX-sc[0],e.clientY-sc[1])});
+  ['pointerup','pointercancel'].forEach(n=>stick.addEventListener(n,e=>{if(e.pointerId===sid){sid=null;setStick(0,0)}}));
+  const right=mk('tr','<div class="pedals"><b id="tG">GAS</b><b id="tB">BRAKE</b></div><div class="acts"><b id="tH">HAND<br>BRAKE</b><b id="tN">NITRO</b><b id="tJ">JUMP</b><b id="tE">ENTER</b></div>');
+  hold(right.querySelector('#tG'),()=>key('KeyW',true),()=>key('KeyW',false));
+  hold(right.querySelector('#tB'),()=>key('KeyS',true),()=>key('KeyS',false));
+  hold(right.querySelector('#tH'),()=>key('Space',true),()=>key('Space',false));
+  hold(right.querySelector('#tJ'),()=>key('Space',true),()=>key('Space',false));
+  hold(right.querySelector('#tN'),()=>{boostBtn=true},()=>{boostBtn=false});
+  right.querySelector('#tE').addEventListener('click',()=>toggleCar());
+  window.touchE=right.querySelector('#tE');
+  const top=mk('tt','<b id="tF">⛶</b>');
+  top.querySelector('#tF').addEventListener('click',()=>{const d=document.documentElement;(d.requestFullscreen||d.webkitRequestFullscreen||(()=>{})).call(d);try{screen.orientation.lock('landscape')}catch(e){}});
+  // one finger on the scene looks around, two fingers pinch to zoom
+  const cv=renderer.domElement,ptr=new Map();let lastD=0;
+  cv.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse')return;ptr.set(e.pointerId,[e.clientX,e.clientY]);lastD=0});
+  cv.addEventListener('pointermove',e=>{
+    if(!ptr.has(e.pointerId))return;
+    const p=ptr.get(e.pointerId);
+    if(ptr.size===1){camY-=(e.clientX-p[0])*.006;camX=clamp(camX+(e.clientY-p[1])*.006,.1,1.35)}
+    ptr.set(e.pointerId,[e.clientX,e.clientY]);
+    if(ptr.size===2){const v=[...ptr.values()],d=Math.hypot(v[0][0]-v[1][0],v[0][1]-v[1][1]);if(lastD)camD=clamp(camD-(d-lastD)*.04,4,22);lastD=d}
   });
-  const cv=renderer.domElement;let tx=0,ty=0,tid=null;
-  cv.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse')return;tid=e.pointerId;tx=e.clientX;ty=e.clientY});
-  cv.addEventListener('pointermove',e=>{if(e.pointerId!==tid)return;camY-=(e.clientX-tx)*.006;camX=Math.max(.1,Math.min(1.35,camX+(e.clientY-ty)*.006));tx=e.clientX;ty=e.clientY});
-  ['pointerup','pointercancel'].forEach(n=>cv.addEventListener(n,e=>{if(e.pointerId===tid)tid=null}));
+  ['pointerup','pointercancel'].forEach(n=>cv.addEventListener(n,e=>{ptr.delete(e.pointerId);lastD=0}));
 }
+
 document.getElementById('bTime').addEventListener('click',e=>{setTime((lights.time+1)%3);e.currentTarget.blur()});

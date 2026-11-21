@@ -257,6 +257,7 @@ function impactAt(wx,wy,wz,nx,ny,nz,strength,mass){
   crash.dmg=Math.min(100,crash.dmg+s*(.05+.85*heavy)*tough);
   crash.shake=Math.min(.6,crash.shake+s*.018);
   crash.flash=Math.min(.55,crash.flash+s*.014);
+  if(Q.touch&&navigator.vibrate&&s>=6)navigator.vibrate(clamp(s*6,20,180));   // phone buzzes on a crash
   if(REC.on&&!REC.replay){audioThud(s);if(s>10)audioClank(s);}
   if(s>16)crash.slow=Math.max(crash.slow,.42);
   const pw=clamp(s/30,.14,.95),rad=clamp(.9+heavy*.5,.9,1.9);

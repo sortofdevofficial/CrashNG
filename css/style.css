@@ -35,11 +35,24 @@ body.touch #bar{bottom:auto;top:calc(max(14px,env(safe-area-inset-top)) + 46px);
 body.touch #bar button{padding:8px 10px;font-size:12px}
 body.touch kbd,body.touch #carName,body.touch #aux{display:none}
 body.touch #stat{font-size:12px;max-width:calc(100% - 150px)}
-#tpad{position:fixed;left:0;right:0;bottom:max(14px,env(safe-area-inset-bottom));display:flex;justify-content:space-between;align-items:flex-end;padding:0 18px;pointer-events:none}
-#tpad .dp{display:grid;grid-template-columns:repeat(3,62px);grid-template-rows:repeat(2,62px);gap:6px}
-#tpad .dp b:nth-child(1){grid-area:1/2}#tpad .dp b:nth-child(2){grid-area:2/1}#tpad .dp b:nth-child(3){grid-area:2/2}#tpad .dp b:nth-child(4){grid-area:2/3}
-#tpad b{pointer-events:auto;display:flex;align-items:center;justify-content:center;background:rgba(15,20,35,.55);border:1px solid rgba(255,255,255,.25);border-radius:16px;color:#fff;font:700 22px system-ui,sans-serif;user-select:none;touch-action:none}
-#tpad .act b{width:104px;height:62px;font-size:13px}
-#tpad b.on{background:rgba(255,176,87,.65)}
 
 #spd{position:fixed;inset:0;pointer-events:none;opacity:0;background:repeating-conic-gradient(from 0deg at 50% 50%,rgba(255,255,255,0) 0 2.6deg,rgba(255,255,255,.2) 2.9deg 3.2deg);-webkit-mask-image:radial-gradient(circle at 50% 50%,transparent 42%,#000 92%);mask-image:radial-gradient(circle at 50% 50%,transparent 42%,#000 92%)}
+
+.tl,.tr,.tt{position:fixed;display:none;z-index:5;pointer-events:none}
+body.touch .tl,body.touch .tr,body.touch .tt{display:flex}
+.tl{left:16px;bottom:max(14px,env(safe-area-inset-bottom));align-items:flex-end}
+.tr{right:16px;bottom:max(14px,env(safe-area-inset-bottom));gap:12px;align-items:flex-end}
+.tt{right:10px;top:calc(max(14px,env(safe-area-inset-top)) + 4px)}
+.tl b,.tr b,.tt b{display:flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;touch-action:none;color:#fff;font:800 14px system-ui,sans-serif;text-align:center;background:rgba(15,20,35,.55);border:1px solid rgba(255,255,255,.28);border-radius:18px}
+.steer{display:none;gap:14px}.steer b{width:92px;height:92px;font-size:34px}
+.stick{width:150px;height:150px;border-radius:50%;background:rgba(15,20,35,.45);border:2px solid rgba(255,255,255,.3);position:relative;touch-action:none;pointer-events:auto}
+.stick i{position:absolute;left:50%;top:50%;width:62px;height:62px;margin:-31px;border-radius:50%;background:rgba(255,255,255,.55);pointer-events:none}
+body.incar .steer{display:flex}body.incar .stick{display:none}
+.pedals{display:none;flex-direction:column;gap:10px}body.incar .pedals{display:flex}
+.pedals b{width:104px;height:84px;font-size:16px}#tG{background:rgba(40,160,80,.6)!important}#tB{background:rgba(190,50,50,.6)!important}
+.acts{display:grid;grid-template-columns:repeat(2,72px);gap:8px}.acts b{height:56px;font-size:12px}
+#tH,#tN{display:none!important}body.incar #tH,body.incar #tN{display:flex!important}
+body.incar #tJ{display:none!important}
+.tt b{width:46px;height:46px;font-size:20px}
+.tl b.on,.tr b.on,.tt b.on{background:rgba(255,176,87,.75)!important}
+body.touch{touch-action:none}

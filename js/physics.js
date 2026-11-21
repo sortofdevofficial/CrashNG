@@ -5,6 +5,7 @@
    Classic scripts: every top-level name here is global; keep load order in index.html. */
 
 function updateCar(dt){
+  updateSurface(dt);
   if(dt<=0)return;
   car.t+=dt;
   let lwF=0,lwR=0,lwSide=0;   // torn-off wheels: those corners have no grip, no drive and drag on the rim
@@ -129,7 +130,7 @@ function updateCar(dt){
     const alphaF=clamp(Math.atan2(vLat+car.yawRate*PHYS.a,den)-car.steer*sgn,-1.4,1.4);
     const alphaR=clamp(Math.atan2(vLat-car.yawRate*PHYS.b,den),-1.4,1.4);
     const latScale=clamp(Math.abs(vLong)/5,0,1);
-    const gripMul=1-crash.dmg*.0025;   // a bent shell loses grip
+    const gripMul=(1-crash.dmg*.0025)*SURF.mu;   // a bent shell loses grip
     const gripF=lwF?(lwF>1?.1:.5):1,gripR=lwR?(lwR>1?.1:.5):1;
     const latF=tireCurve(alphaF,FzF,PHYS.muF*gripMul*gripF)*Math.cos(car.steer)*latScale;
     const latR=tireCurve(alphaR,FzR,PHYS.muR*gripMul*gripR)*latScale*(1-.5*hb);
@@ -153,8 +154,8 @@ function updateCar(dt){
     car.abs+=((absOn?1:0)-car.abs)*Math.min(1,16*dt);
 
     const slopeG=-PHYS.mass*PHYS.g*Math.sin(pitchT);
-    const FxBody=fxF+fxR-(PHYS.roll+lwN*2600)*Math.tanh(vLong*3)+slopeG;
-    const FyBody=latF+latR;
+    const FxBody=fxF+fxR-(PHYS.roll+SURF.roll+lwN*2600)*Math.tanh(vLong*3)+slopeG+SURF.side*PHYS.mass*sinH;
+    const FyBody=latF+latR+SURF.side*PHYS.mass*cosH;
     const spNow=Math.hypot(vx,vz);
     const axx=(sinH*FxBody+cosH*FyBody-PHYS.drag*spNow*vx)/PHYS.mass;
     const azz=(cosH*FxBody-sinH*FyBody-PHYS.drag*spNow*vz)/PHYS.mass;
