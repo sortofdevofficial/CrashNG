@@ -51,8 +51,15 @@ body.incar .steer{display:flex}body.incar .stick{display:none}
 .pedals{display:none;flex-direction:column;gap:10px}body.incar .pedals{display:flex}
 .pedals b{width:104px;height:84px;font-size:16px}#tG{background:rgba(40,160,80,.6)!important}#tB{background:rgba(190,50,50,.6)!important}
 .acts{display:grid;grid-template-columns:repeat(2,72px);gap:8px}.acts b{height:56px;font-size:12px}
-#tH,#tN{display:none!important}body.incar #tH,body.incar #tN{display:flex!important}
+#tH{display:none!important}body.incar #tH{display:flex!important}
 body.incar #tJ{display:none!important}
 .tt b{width:46px;height:46px;font-size:20px}
 .tl b.on,.tr b.on,.tt b.on{background:rgba(255,176,87,.75)!important}
 body.touch{touch-action:none}
+
+/* ---- UI fixes: nothing overlaps or runs off-screen ---- */
+#bar{flex-wrap:wrap;justify-content:center;max-width:calc(100% - 24px);box-sizing:border-box;z-index:6}
+#stat{max-width:min(46vw,420px);box-sizing:border-box;z-index:4}
+#speed,#gear,#aux{z-index:4;text-align:right}
+@media(max-width:900px){#carName{top:calc(max(16px,env(safe-area-inset-top)) + 54px)}#bar button{padding:8px 10px;font-size:12px}}
+@media(max-width:560px){#stat{max-width:calc(100% - 150px);font-size:12px}}

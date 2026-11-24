@@ -18,6 +18,7 @@ function resetCar(){
   crash.dmg=crash.eng=crash.shake=crash.flash=crash.slow=crash.cool=crash.smokeT=0;crash.parts=0;
   wheelDmg[0]=wheelDmg[1]=wheelDmg[2]=wheelDmg[3]=0;
   if(!REC.replay){REC.time=0;REC.acc=0;REC.obsAcc=0;REC.samples.length=0;REC.ev.length=0;REC.obs.length=0;REC.on=true}
+  car.bt=0;car.btMsg=false;car.et=90;FLIP.t=0;FLIP.angle=0;boomed=false;burnT=0;CHK.stuck=0;CHK.shown=false;
   repairBody();repairParts();updateDmgHud();
 }
 
@@ -26,7 +27,7 @@ function setCar(v){
   document.getElementById('carName').classList.toggle('on',v);
   document.getElementById('aux').classList.toggle('on',v);
   document.body.classList.toggle('incar',v);if(window.touchE)touchE.textContent=v?'EXIT':'ENTER';   // touch pad layout follows the seat
-  if(v){audioInit();statEl.textContent='W throttle · S brake/reverse · A/D steer · Space handbrake · Shift boost · H horn · L lights · X hazards · N night'}
+  if(v){audioInit();statEl.textContent='W throttle · S brake/reverse · A/D steer · Space handbrake · H horn · L lights · X hazards · N night'}
 }
 // --- vehicle fleet: one is live (physics + crash model), the rest sit parked; walking to one swaps them ---
 function applySkin(k){
@@ -57,7 +58,7 @@ function makeParked(k,x,z,h){   // static copy of car k (own geometry + colours)
   const g=carG.clone(true),pC=paint.clone(),cC=caliperM.clone(),kill=[];
   const sw=m=>m===paint?pC:m===caliperM?cC:m;
   g.traverse(o=>{
-    if(o.isSpotLight){kill.push(o);return}
+    if(o.isSpotLight||o.isSprite){kill.push(o);return}
     if(o.userData&&o.userData.beamCone)o.visible=false;   // the parked copy doesn't project light cones
     if(!o.isMesh)return;
     if(SOFT.some(e=>e.mesh.geometry===o.geometry)||o.geometry.attributes.position===bodyGeo.attributes.position)o.geometry=o.geometry.clone();   // only deformable meshes need their own copy; everything else shares GPU buffers
@@ -99,11 +100,17 @@ function toggleCar(){
     pos.set(car.pos.x+Math.cos(car.h)*3,gh(car.pos.x,car.pos.z),car.pos.z-Math.sin(car.h)*3);vel.set(0,0,0);face=car.h;
   }
 }
+function toCheckpoint(msg){   // put the live car back on the road at the last checkpoint, repaired, pointing downhill
+  const z=CHK.z;resetCar();
+  if(z<RZ-5){car.pos.set(RX,gh(RX,z)+.1,z);car.h=Math.PI;car.gy=car.pos.y;carG.position.copy(car.pos);carG.rotation.set(0,car.h,0)}
+  if(inCar){camY=car.h+Math.PI;camX=.3}
+  statEl.textContent=msg||'Back at the checkpoint';
+}
 function respawnCar(){
   if(RP.on){endReplay();return}
-  layoutCars();resetObstacles();if(inCar){camY=car.h+Math.PI;camX=.3}statEl.textContent='Cars repaired & back on the runway';
+  CHK.z=-14;layoutCars();resetObstacles();if(inCar){camY=car.h+Math.PI;camX=.3}statEl.textContent='Cars repaired & back on the runway';
 }
-addEventListener('keydown',e=>{if(e.code==='KeyE')toggleCar();if(e.code==='KeyR')respawnCar()});
+addEventListener('keydown',e=>{if(e.code==='KeyE')toggleCar();if(e.code==='KeyR')respawnCar();});
 const clickBtn=(id,f)=>{const b=document.getElementById(id);b.addEventListener('click',()=>{f();b.blur()})};
 clickBtn('bCar',toggleCar);clickBtn('bRespawn',respawnCar);
 clickBtn('bReplay',startReplay);
@@ -118,9 +125,6 @@ const bHorn=document.getElementById('bHorn');
 bHorn.addEventListener('pointerdown',()=>{audioInit();hornBtn=true});
 ['pointerup','pointerleave','pointercancel'].forEach(n=>bHorn.addEventListener(n,()=>hornBtn=false));
 applySkin('lambo');layoutCars();
-const bb=document.getElementById('bBoost');
-['pointerdown'].forEach(n=>bb.addEventListener(n,()=>boostBtn=true));
-['pointerup','pointerleave','pointercancel'].forEach(n=>bb.addEventListener(n,()=>boostBtn=false));
 scene.add(sun.target);
 
 // --- Springs ---
@@ -141,9 +145,12 @@ addEventListener('wheel',e=>camD=Math.max(4,Math.min(22,camD+e.deltaY*.01)));
 
 const pos=new THREE.Vector3(RX,gh(RX,-24)+.3,-24),vel=new THREE.Vector3();
 const tmpDir=new THREE.Vector3(),tmpCam=new THREE.Vector3(),YAXIS=new THREE.Vector3(0,1,0);
-let face=0,faceT=0,grounded=true,walk=0,t=0,frameN=0;
+let face=0,faceT=0,grounded=true,walk=0,t=0,frameN=0,cullN=0;const _wd=new THREE.Vector3(),_sd=new THREE.Vector3();
 renderer.shadowMap.autoUpdate=false;renderer.shadowMap.needsUpdate=true;   // refresh shadows at half rate instead of twice a frame
 const clock=new THREE.Clock(),spdEl=document.getElementById('spd');
+const fpsEl=document.createElement('div');   // P toggles a tiny fps / resolution / draw-call readout
+fpsEl.style.cssText='position:fixed;left:16px;bottom:96px;color:#fff;font:600 11px system-ui,sans-serif;opacity:.75;display:none;pointer-events:none;text-shadow:0 1px 4px #000';document.body.appendChild(fpsEl);
+addEventListener('keydown',e=>{if(e.code==='KeyP')fpsEl.style.display=fpsEl.style.display==='none'?'block':'none'});
 let perfT=0,perfN=0,perfStep=0;
 function frame(){
   requestAnimationFrame(frame);
@@ -152,17 +159,19 @@ function frame(){
   if(crash.slow>0)crash.slow=Math.max(0,crash.slow-raw);
   const dt=raw*(crash.slow>0?.35:1);t+=dt;
   if(RP.on)updateReplay(raw);
-  else{updateCar(dt);recordFrame(raw)}
-  updateAuto(raw);audioUpdate();updatePads(raw);updateSpinners(raw);animateZones(raw);crashFX(raw);updateLoose(raw);
-  spdEl.style.opacity=inCar?(clamp((Math.abs(car.speed)*3.6-140)/260,0,1)*.85).toFixed(2):'0';   // speed streaks at the screen edge
+  else{updateCar(dt);updateFlip(dt);if(FLIP.angle)carG.rotation.z+=FLIP.angle;recordFrame(raw)}
+  updateAuto(raw);audioUpdate();updatePads(raw);updateTraffic(raw);crashFX(raw);crashBurn(raw);updateLoose(raw);updateWeather(raw);updateGlow(raw);
+  spdEl.style.opacity='0';
   // dynamic resolution: nudge the pixel ratio to hold ~50 fps on any device; shadows only go if even the floor can't cope
   if(!document.hidden){perfT+=raw;perfN++}
   if(perfT>1.2){
     const fps=perfN/perfT;perfT=0;perfN=0;
+    fpsEl.textContent=Math.round(fps)+' fps · '+renderer.getPixelRatio().toFixed(2)+'x · '+renderer.info.render.calls+' draws';
     const lo=Q.low?.5:.6,hi=Q.pr;let pr=renderer.getPixelRatio();
     if(fps<46&&pr>lo){pr=Math.max(lo,pr-.15);renderer.setPixelRatio(pr)}
     else if(fps>57&&pr<hi){pr=Math.min(hi,pr+.1);renderer.setPixelRatio(pr)}
-    if(fps<28&&pr<=lo&&renderer.shadowMap.enabled){renderer.shadowMap.enabled=false;sun.castShadow=false;scene.traverse(o=>{if(o.material&&!Array.isArray(o.material))o.material.needsUpdate=true})}
+    if(fps<36&&pr<=lo&&sun.shadow.mapSize.x>1024){sun.shadow.mapSize.set(1024,1024);if(sun.shadow.map){sun.shadow.map.dispose();sun.shadow.map=null}}   // first step: smaller shadow map
+    else if(fps<28&&pr<=lo&&renderer.shadowMap.enabled){renderer.shadowMap.enabled=false;sun.castShadow=false;scene.traverse(o=>{if(o.material&&!Array.isArray(o.material))o.material.needsUpdate=true})}
   }
 
   const mx=(keys.KeyD||keys.ArrowRight?1:0)-(keys.KeyA||keys.ArrowLeft?1:0);
@@ -244,6 +253,17 @@ function frame(){
   if(crash.flash>.004){hitEl.style.opacity=crash.flash.toFixed(3);crash.flash*=Math.exp(-7*raw)}
   else if(crash.flash){hitEl.style.opacity='0';crash.flash=0}
   if(skyDome)skyDome.position.copy(camera.position);   // keep the dome around the player on the long track
+  mountains.position.set(camera.position.x,camera.position.y-150,camera.position.z);
+  {   // sun flare: only when the sun is in front of the camera in daylight
+    camera.getWorldDirection(_wd);const sd=_sd.copy(SUNOFF).normalize(),dp=_wd.dot(sd);
+    sunFlare.position.copy(camera.position).addScaledVector(sd,2500);
+    sunFlare.material.opacity=lights.time===2?0:clamp((dp-.55)*2.2,0,1)*.7;
+  }
+  if((++cullN&7)===0){   // distance culling: parked copies, spinners and ramp overlays far from the camera are not drawn
+    for(const k in parked){const g=parked[k];if(g){const dx=g.position.x-camera.position.x,dy=g.position.y-camera.position.y,dz=g.position.z-camera.position.z;g.visible=dx*dx+dy*dy+dz*dz<250000}}
+    for(const s of SPIN){const dx=s.x-camera.position.x,dz=s.z-camera.position.z;s.root.visible=dx*dx+dz*dz<640000}
+    cullZones();
+  }
   stars.position.copy(camera.position);
   sun.target.position.copy(focus);sun.position.set(focus.x+SUNOFF.x,focus.y+SUNOFF.y,focus.z+SUNOFF.z);
   if(renderer.shadowMap.enabled&&(++frameN&1))renderer.shadowMap.needsUpdate=true;
@@ -281,12 +301,11 @@ if(Q.touch){
   stick.addEventListener('pointerdown',e=>{e.preventDefault();sid=e.pointerId;stick.setPointerCapture(sid);const r=stick.getBoundingClientRect();sc=[r.left+r.width/2,r.top+r.height/2];setStick(e.clientX-sc[0],e.clientY-sc[1])});
   stick.addEventListener('pointermove',e=>{if(e.pointerId===sid)setStick(e.clientX-sc[0],e.clientY-sc[1])});
   ['pointerup','pointercancel'].forEach(n=>stick.addEventListener(n,e=>{if(e.pointerId===sid){sid=null;setStick(0,0)}}));
-  const right=mk('tr','<div class="pedals"><b id="tG">GAS</b><b id="tB">BRAKE</b></div><div class="acts"><b id="tH">HAND<br>BRAKE</b><b id="tN">NITRO</b><b id="tJ">JUMP</b><b id="tE">ENTER</b></div>');
+  const right=mk('tr','<div class="pedals"><b id="tG">GAS</b><b id="tB">BRAKE</b></div><div class="acts"><b id="tH">HAND<br>BRAKE</b><b id="tJ">JUMP</b><b id="tE">ENTER</b></div>');
   hold(right.querySelector('#tG'),()=>key('KeyW',true),()=>key('KeyW',false));
   hold(right.querySelector('#tB'),()=>key('KeyS',true),()=>key('KeyS',false));
   hold(right.querySelector('#tH'),()=>key('Space',true),()=>key('Space',false));
   hold(right.querySelector('#tJ'),()=>key('Space',true),()=>key('Space',false));
-  hold(right.querySelector('#tN'),()=>{boostBtn=true},()=>{boostBtn=false});
   right.querySelector('#tE').addEventListener('click',()=>toggleCar());
   window.touchE=right.querySelector('#tE');
   const top=mk('tt','<b id="tF">⛶</b>');

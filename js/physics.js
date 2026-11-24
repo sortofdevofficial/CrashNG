@@ -16,7 +16,7 @@ function updateCar(dt){
   const up=kd('KeyW')||kd('ArrowUp'),dn=kd('KeyS')||kd('ArrowDown');
   const st=((kd('KeyA')||kd('ArrowLeft'))?1:0)-((kd('KeyD')||kd('ArrowRight'))?1:0);
   const spaceB=inCar&&keys.Space;                      // handbrake: locks the rear axle, kills rear grip
-  const boost=inCar&&(keys.ShiftLeft||keys.ShiftRight||boostBtn);
+  const boost=false;   // nitro removed
   car.throttle+=((up?1:0)-car.throttle)*Math.min(1,(up?PHYS.thrUp:PHYS.thrDn)*dt);
   car.brake+=((dn?1:0)-car.brake)*Math.min(1,PHYS.thrDn*dt);
   if(!inCar){car.throttle=0;car.brake=0}
@@ -66,7 +66,7 @@ function updateCar(dt){
     const yPrev=car.pos.y;
     car.vy-=PHYS.g*dt;
     car.pos.y+=car.vy*dt;
-    if(!centerVoid&&car.vy<=0&&yPrev>=gAvg&&car.pos.y<=gAvg){
+    if(!centerVoid&&car.vy<=0&&car.pos.y<=gAvg){   // no 'was above last frame' test: pushed under a rising slope still lands
       const impact=Math.max(0,car.gv-car.vy);
       if(car.airT>.35)statEl.textContent='Last jump: '+Math.round(Math.hypot(car.pos.x-car.from.x,car.pos.z-car.from.z))+' m · '+car.airT.toFixed(1)+' s in the air';
       car.pos.y=gAvg;car.vy=car.gv;car.air=false;car.airT=0;
@@ -90,7 +90,13 @@ function updateCar(dt){
       car.pos.y+=car.vy*sdt;
       if(car.pos.y<gAvg-.055){car.pos.y=gAvg-.055;if(car.vy<car.gv)car.vy=car.gv}   // bump stop
     }
-    if(centerVoid||car.pos.y-gAvg>.5){car.air=true;car.airT=0;car.from.copy(car.pos)}
+    // ramp glue: on the downhill ramp the ground drops away faster than the spring follows, which made the car hop over and over
+    const onRamp=Math.abs(car.pos.x-RX)<RW/2&&car.pos.z<=RZ&&car.pos.z>=RZ-RL+8;
+    if(onRamp&&!centerVoid){
+      const gp=car.pos.y-gAvg;
+      if(gp>0&&gp<1.2){car.pos.y-=gp*Math.min(1,30*dt);if(car.vy>car.gv)car.vy+=(car.gv-car.vy)*Math.min(1,18*dt)}
+    }
+    if(centerVoid||car.pos.y-gAvg>(onRamp?1.3:.5)){car.air=true;car.airT=0;car.from.copy(car.pos)}
   }
 
   // --- longitudinal & lateral tire model ---
@@ -137,7 +143,11 @@ function updateCar(dt){
 
     const capF=PHYS.muF*FzF*gripMul*gripF,capR=PHYS.muR*FzR*gripMul*gripR;
     const dirNow=vLong>.25?1:vLong<-.25?-1:0;
-    const bf=svcBrake*PHYS.brakeForce,hbf=hb*PHYS.hbForce;
+    // brakes heat up with pressure x speed and cool with airflow; a long downhill on the pedal makes them fade
+    car.bt=Math.max(0,(car.bt||0)+(svcBrake*Math.abs(vLong)*.006-(car.bt||0)*(.03+Math.abs(vLong)*.0006))*dt);
+    const fade=1-clamp((car.bt-1)/2.4,0,.6);
+    if(fade<.8&&!car.btMsg){car.btMsg=true;statEl.textContent='BRAKES FADING — lift off and use engine braking!'}else if(car.bt<.5)car.btMsg=false;
+    const bf=svcBrake*PHYS.brakeForce*fade,hbf=hb*PHYS.hbForce;
     const fxCapF=Math.sqrt(Math.max(0,capF*capF-latF*latF));
     const fxCapR=Math.sqrt(Math.max(0,capR*capR-latR*latR));
     // drive/brake split per axle (AWD cars, rear-drive truck), each limited by its own friction circle
@@ -163,6 +173,7 @@ function updateCar(dt){
     car.yawRate+=(PHYS.a*latF-PHYS.b*latR)/PHYS.izz*dt;
     car.yawRate*=Math.exp(-.9*dt);
     if(lwN)car.yawRate+=lwSide*clamp(Math.abs(vLong)/22,0,1)*1.1*dt;   // dragging a bare rim pulls the car to that side
+    car.yawRate+=(wheelDmg[1]+wheelDmg[3]-wheelDmg[0]-wheelDmg[2])*.45*clamp(Math.abs(vLong)/25,0,1)*dt;   // bent wheels pull the car to one side
     car.ax+=(FxBody/PHYS.mass-car.ax)*Math.min(1,10*dt);
     car.ay+=(FyBody/PHYS.mass-car.ay)*Math.min(1,10*dt);
   }else{
@@ -183,7 +194,7 @@ function updateCar(dt){
 
   // side barriers: concrete walls along the deck + ramp, steel rails on the landing strip
   const bz=car.pos.z;
-  const wallL=bz>=RZ-RL&&bz<=40?RW/2-PHYS.halfW:(bz>=LZ0-SL&&bz<=LZ0?19.3-PHYS.halfW:0);
+  const wallL=bz>=LZ0-SL&&bz<=40?RW/2-PHYS.halfW:0;   // concrete walls on the deck + ramp, kerbs along the city street
   if(wallL&&Math.abs(car.pos.x-RX)>wallL){
     const side=car.pos.x>RX?1:-1;
     const strength=Math.abs(vx);
@@ -199,6 +210,14 @@ function updateCar(dt){
         statEl.textContent=side>0?'Clipped the right barrier':'Clipped the left barrier';
       }else if(hit>.35){puff(car.pos.x,car.pos.y,car.pos.z,3,.8,1.4);statEl.textContent='Scraped the barrier'}
     }
+  }
+  // the city street dead-ends at a row of barriers
+  const endZ=LZ0-SL+3.4;
+  if(car.pos.z<endZ){
+    const sp=Math.max(0,-vz);car.pos.z=endZ;
+    if(vz<0){vz=-vz*.15;vx*=.8;car.vel.x=vx;car.vel.z=vz;
+      if(sp>3)impactAt(car.pos.x,car.pos.y+.55,endZ-.6,0,0,1,sp*1.1,3000);
+      statEl.textContent='Dead end — turn around (R respawns)'}
   }
   car.speed=car.vLong=vx*Math.sin(car.h)+vz*Math.cos(car.h);
   car.vLat=vx*Math.cos(car.h)-vz*Math.sin(car.h);
@@ -266,7 +285,7 @@ function updateCar(dt){
 
   // brake lights, glowing discs + boost flames
   tailM.emissiveIntensity=(svcBrake>.2||hb)?3:(lights.night?1.6:.9);
-  discM.emissiveIntensity=(svcBrake>.55&&Math.abs(car.speed)>8)?1.1:0;
+  discM.emissiveIntensity=Math.min(1.6,(car.bt||0)*.55);   // hot discs glow
   const flamesOn=boost&&car.throttle>.4&&Math.abs(car.speed)>1;
   flames.forEach(f=>{f.visible=flamesOn;if(flamesOn)f.scale.set(.85+Math.random()*.4,1+Math.random()*.9,.85+Math.random()*.4)});
 

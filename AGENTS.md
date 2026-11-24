@@ -115,14 +115,34 @@ Damage zones per part: `front`, `rear`, `left`, `right`, or none (any hit), gate
 - Extra parts: crash beams (need nose/bumper gone first), wipers, antenna, tow hooks, control arms (snap when a wheel is wrecked), fenders, quarters, driveshaft, fuel cell (fire).
 - `spawnGlass()` on window/windscreen loss; `crashFX()` adds steam (no radiator) and oil/coolant/fuel puddles; every hit sheds ~0.35% speed per strength point (energy absorbed by crush).
 
-## Ramp areas + terrain (world.js ZONES/terrain, obstacles.js)
+## Ramp areas + terrain (world.js, obstacles.js)
 
-- The ramp is 3600 m long and 26 m wide, split into 5 big areas of 720 m: wet meadow (slippery grass), frozen lake (ice + hammers), desert (sand + bounce pads + blades), lava canyon (lava chicane + blades), neon city (oil, conveyor, blades). `AREA_NAMES` shows on entering each.
-- Terrain: `TER` heightmap (60 x ~180 grid) + hills/biome colours + instanced scenery; `gh()` falls back to `terrainH()` off the road, so cars can drive on the terrain and the mesh matches physics.
-- Props are deliberately sparse (about one cluster per 110 m). Desktops default to HIGH graphics (4096 shadows, DPR 2); the resolution scaler still protects slow GPUs.
+- The ramp is 1800 m long, 26 m wide, split into 3 areas of `AL` = 600 m: **hills** (normal asphalt through hilly terrain), **frozen road** (ice, `SURF.mu` 0.05, snow), **city** (asphalt, towers with lit windows, street lamps, ~12 traffic cars).
+- Traffic: `TRAF` cars drive down the city stretch (`updateTraffic`); `hitTraffic` pushes the player out, shoves/brakes the traffic car and calls `impactAt()`.
+- Terrain: `TER` heightmap + hills/biome colours + instanced scenery; `gh()` falls back to `terrainH()` off the road. Lane lines are instanced; no boost pads/neon gates/weapons any more (realism).
 
 ### Ramp sections (older notes)
 
 - `ZONES` splits the ramp into stretches (asphalt, ice, hammers, lava chicane, sand, oil, conveyor, bounce pads, blades, ice finale); `surfAt(x,z)` says what the tyres are on and `overlay` meshes colour each one.
 - `updateSurface()` (called at the top of `updateCar`) fills `SURF`: ice mu 0.1, oil 0.3, sand drag, lava burns (damage + engine fire), conveyor side push, bounce pads launch the car.
 - `SPIN` = rotating hammers/blades on posts tilted with the ramp; `updateSpinners()` tests arm points against the car box and calls `impactAt()` with the point velocity (omega x r).
+
+## Visual + performance extras (latest pass)
+
+- world.js: distant `mountains` ring + `sunFlare` sprite follow the camera; terrain has a detail texture; the canvas gets a CSS colour grade on high quality; ramp overlays are distance-culled (`cullZones`).
+- electrics.js `updateWeather()`: rain / snow / dust / embers / neon motes per area (one `Points`, 1100 particles, 350 on low).
+- main.js: every 8 frames parked copies, spinners and overlays far from the camera are hidden (the biggest draw-call saver).
+- damage.js: passenger cell is stiffer than the crumple zones, crush cap 1.9 m, strength cap 55, loose hood peels up / doors swing open at speed; physics.js: bent wheels pull the car to one side.
+
+## Latest pass: rollover, fire, glow
+
+- damage.js: `FLIP` rollover (`startFlip/updateFlip`, roof dent via `impactAt(..., ny=-1)`), `crashBurn/explodeCar` (an engine fire that burns ~9 s detonates and throws parts). Triggers live in obstacles.js (`updateSurface` sideways-speed check, blade slams).
+- electrics.js `updateGlow()`: headlight/taillight halos, night moon, per-area fog tint (`FOGB` is the time-of-day base colour).
+- main.js: the resolution scaler now shrinks the shadow map before it disables shadows; `P` shows fps / resolution / draw calls.
+
+## Realism pass
+
+- Traffic (`obstacles.js`): cars keep a following distance (to each other and to the player), brake with lit tail lights, and a hard hit turns one into a wreck (spins, crumples, hazards blinking, stays stopped until it loops/respawns).
+- Brakes (`physics.js`): `car.bt` heat from pressure x speed, fade up to -60% and glowing discs; message tells you to use engine braking.
+- Engine (`damage.js` `crashFX`): `car.et` temperature; no radiator -> overheats, cooks the engine past 140 C and seizes it.
+- Audio: wind noise rises with speed. World: speed-limit signs along the ramp.

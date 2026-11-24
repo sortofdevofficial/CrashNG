@@ -89,7 +89,7 @@ const OB=[];
   // deck: just a couple of cones
   add('cone',RX-3.2,-24,0);add('cone',RX+3.4,-27,0);
   // down the ramp: sparse, roughly every 110 m (nothing in the first stretch)
-  for(let i=0;i<Math.floor((RL-300)/110);i++){
+  for(let i=0;i<Math.floor((RL-100)/110);i++){
     if(Q.low&&i%2)continue;
     const z=RZ-130-i*110,side=i%2?1:-1;
     add('cone',RX+side*5,z,0);add('cone',RX-side*3,z-6,0);
@@ -98,15 +98,12 @@ const OB=[];
     if(i%5===2)add('bigcrate',RX,z-30,rnd()*3);
     if(i%6===3)add('sign',RX+side*10,z-12,0);
   }
-  // landing strip: one barrel wall, a few crates, a bowling lane, a little scatter
-  const zb=LZ0-30;
-  for(let i=0;i<7;i++)if(!Q.low||i%2===0)add(i%2?'drum':'drumR',RX-8+i*2.7,zb,0);
-  for(let i=0;i<3;i++)add('crate',RX-4+i*4,zb-30,rnd()*3);
-  for(let r=0;r<4;r++)for(let c=0;c<=r;c++)add('pin',RX-.9+c*.62-r*.31,zb-90-r*.6,0);
-  add('block',RX-5,zb-130,.2);add('block',RX+5.5,zb-150,-.2);
-  for(let i=0;i<10;i++){if(Q.low&&i%2)continue;add(['cone','drum','tyre','crate','hay','sign'][i%6],RX+(rnd()-.5)*30,zb-170-rnd()*(SL-400),rnd()*3)}
+  // city: one lane-closure with cones and a sign (roadworks)
+  for(let i=0;i<7;i++)add('cone',RX-12+i*1.1,RZ-2*AL-95-i*7,0);
+  add('sign',RX-11.5,RZ-2*AL-88,0);add('drum',RX-10.5,RZ-2*AL-150,0);add('drum',RX-10.5,RZ-2*AL-154,0);
 }
 function resetObstacles(){
+  resetTraffic();
   for(const o of OB){
     o.pos.copy(o.home);o.vel.set(0,0,0);o.av.set(0,0,0);
     o.rx=o.rz=0;o.ry=o.homeRy;o.sleep=true;
@@ -246,37 +243,33 @@ function collideParked(dt){
 }
 
 // --- boost pads: driving over a glowing chevron pad shoves the car forward (PADS built in world.js) ---
-function updatePads(dt){
-  if(!inCar||RP.on||car.air)return;
-  for(const p of PADS){
-    if(Math.abs(car.pos.x-p.x)<2.3&&car.pos.z<=p.z0&&car.pos.z>=p.z1){
-      const sx=Math.sin(car.h),cz=Math.cos(car.h);
-      car.vel.x+=sx*95*dt;car.vel.z+=cz*95*dt;
-      car.speed=car.vLong=car.vel.x*sx+car.vel.z*cz;car.vLat=car.vel.x*cz-car.vel.z*sx;
-      statEl.textContent='BOOST!';return;
-    }
-  }
-}
+function updatePads(dt){}   // boost pads removed
 
 // --- ramp sections: surface physics. physics.js multiplies grip by SURF.mu, adds SURF.roll drag and SURF.side push ---
 const SURF={mu:1,roll:0,side:0,name:'asphalt'};
 let surfCool=0,lavaFx=0;
+const CHK={z:-14,stuck:0,shown:false};   // (checkpoints removed; kept so resetCar() can clear it)
 function updateSurface(dt){
+  if(inCar&&!RP.on){
+    const onRoad=Math.abs(car.pos.x-RX)<RW/2&&!car.air;
+    const inGap=false;
+    if(car.pos.y<-60||inGap){respawnCar();statEl.textContent='You fell — respawned';return}
+  }
+  if(inCar&&!RP.on&&!car.air&&FLIP.t<=0&&Math.abs(car.vLat)>17&&Math.abs(car.speed)>20&&SURF.mu>=.7)startFlip(Math.sign(car.vLat)||1);   // too much sideways speed on a grippy surface trips the car
   SURF.mu=1;SURF.roll=0;SURF.side=0;
   let nm='asphalt';
   if(inCar&&!RP.on&&!car.air){
     const s=surfAt(car.pos.x,car.pos.z);
     if(s){
       nm=s.t;
-      if(s.t==='ice')SURF.mu=.1;
+      if(s.t==='ice')SURF.mu=.05;   // black ice: very slippery
       else if(s.t==='grass'){SURF.mu=.38;SURF.roll=500}
       else if(s.t==='oil')SURF.mu=.3;
       else if(s.t==='sand'){SURF.mu=.72;SURF.roll=9000;if(Math.abs(car.speed)>8&&Math.random()<.5)puff(car.pos.x,car.pos.y,car.pos.z,1,.9,2,0xd9b46a)}
-      else if(s.t==='conveyor')SURF.side=s.s;
-      else if(s.t==='lava'){   // the car burns: damage + engine fire, and the lava drags at the wheels
+            else if(s.t==='lava'){   // the car burns: damage + engine fire, and the lava drags at the wheels
         SURF.roll=6000;crash.dmg=Math.min(100,crash.dmg+7*dt);crash.eng=Math.min(1,crash.eng+.16*dt);
         lavaFx-=dt;if(lavaFx<=0){lavaFx=.07;puff(car.pos.x,car.pos.y+.2,car.pos.z,1,.8,2.2,0xff6a18)}
-      }else if(s.t==='bounce'&&surfCool<=0){car.vy=20;car.pos.y+=.35;car.air=true;car.airT=0;car.from.copy(car.pos);surfCool=1.2}
+      }
     }
   }
   if(surfCool>0)surfCool-=dt;
@@ -285,7 +278,7 @@ function updateSurface(dt){
     const msg={grass:'WET GRASS — slippery!',ice:'ICE — almost no grip!',oil:'OIL SLICK — careful!',sand:'SAND — it drags you down',lava:'LAVA! Get off it!',conveyor:'CONVEYOR — pushed sideways',bounce:'BOUNCE PAD!'}[nm];
     if(msg)statEl.textContent=msg;
   }
-  const q=zoneAt(car.pos.z),ai=q&&inCar?Math.min(4,Math.floor((RZ-car.pos.z)/720)):-1;
+  const q=zoneAt(car.pos.z),ai=q&&inCar?Math.min(2,Math.floor((RZ-car.pos.z)/AL)):-1;
   if(ai!==updateSurface.ai){updateSurface.ai=ai;if(ai>=0)statEl.textContent='AREA '+(ai+1)+'/5 — '+AREA_NAMES[ai]}
 }
 
@@ -313,11 +306,7 @@ const SPIN=[];
     }
     SPIN.push({root,arm,x,z,len,speed,phase:Math.random()*6,cool:0});
   }
-  [850,1000,1150,1300].forEach((d,i)=>addSpinner('hammer',RX+(i%2?-4:4),d,(i%2?-1:1)*(1.8+i*.15),8.5));        // frozen lake
-  [1700,1950].forEach((d,i)=>addSpinner('blade',RX,d,(i%2?-1:1)*2.0,9));                                         // desert
-  [2260,2390,2520,2650,2780].forEach((d,i)=>addSpinner('blade',RX+(i%2?-5:5),d,(i%2?-1:1)*(2.2+i*.1),9));      // lava canyon
-  [2950,3080,3200].forEach((d,i)=>addSpinner('hammer',RX+(i-1)*4,d,(i%2?-1:1)*2.1,8.5));                        // neon city: oil
-  [3300,3380,3460,3540].forEach((d,i)=>addSpinner('blade',RX+(i%2?-5:5),d,(i%2?-1:1)*2.6,9));                  // neon city: conveyor
+  // (rotating weapons removed for realism: the SPIN list stays empty)
 }
 const _sp=new THREE.Vector3();
 function updateSpinners(dt){
@@ -338,11 +327,95 @@ function updateSpinners(dt){
     const rx=hit.x-s.x,rz=hit.z-s.z,vx=s.speed*rz,vz=-s.speed*rx,sp=Math.hypot(vx,vz)||1;   // omega x r: velocity of the struck point
     const rel=Math.hypot(vx-car.vel.x,vz-car.vel.z);
     if(rel<3)continue;
-    const nx=vx/sp,nz=vz/sp,push=clamp(rel*.3,0,15);
+    const nx=vx/sp,nz=vz/sp,push=clamp(rel*.22,0,11);
     car.vel.x+=nx*push;car.vel.z+=nz*push;
     car.yawRate+=clamp(((hit.x-car.pos.x)*nz-(hit.z-car.pos.z)*nx)*.15,-2,2);
-    impactAt(hit.x,hit.y,hit.z,nx,.15,nz,clamp(rel*.95,6,40),420);
-    s.cool=.5;
+    impactAt(hit.x,hit.y,hit.z,nx,.15,nz,clamp(rel*.6,5,30),300);
+    if(rel>20)startFlip(Math.sign(nx*Math.cos(car.h)-nz*Math.sin(car.h))||1);   // a hard blade slam rolls the car
+    s.cool=.9;
     car.speed=car.vLong=car.vel.x*Math.sin(car.h)+car.vel.z*Math.cos(car.h);car.vLat=car.vel.x*Math.cos(car.h)-car.vel.z*Math.sin(car.h);
+  }
+}
+
+// --- city traffic: ordinary cars at 50-75 km/h that keep a following distance, brake (lights on) for slower cars or you, and when hit hard
+// become wrecks: they spin, crumple, stop and blink their hazards ---
+const TRAF=[];
+{
+  const cols=[0xc9d1d9,0x2b3a55,0xb02a2a,0x1f1f23,0xf2c230,0x3a6b4a,0xf2c230,0x8a8f96];
+  const mats=cols.map(c=>new THREE.MeshStandardMaterial({color:c,roughness:.35,metalness:.5,envMap:ENV,envMapIntensity:.5}));
+  const glass=new THREE.MeshStandardMaterial({color:0x0a1018,roughness:.05,metalness:.8}),tire=new THREE.MeshStandardMaterial({color:0x111111,roughness:.9});
+  const hl=new THREE.MeshBasicMaterial({color:0xfff2cf});
+  const gB=new THREE.BoxGeometry(1.8,.62,4.3,2,1,6),gC=new THREE.BoxGeometry(1.55,.5,2.1),gW=new THREE.CylinderGeometry(.33,.33,.24,12),gL=new THREE.BoxGeometry(.4,.1,.05);
+  const lanes=[-9,-3,3,9],d0=2*AL+20,d1=RL-30;let sd=11;const rnd=()=>((sd=(sd*1103515245+12345)&0x7fffffff)/0x7fffffff);
+  for(let i=0;i<(Q.low?5:8);i++){
+    const g=new THREE.Group();g.rotation.order='YXZ';
+    const b=new THREE.Mesh(gB,mats[i%8]);b.position.y=.55;g.add(b);
+    const c=new THREE.Mesh(gC,glass);c.position.set(0,1.05,-.15);g.add(c);
+    [[-.9,1.4],[.9,1.4],[-.9,-1.4],[.9,-1.4]].forEach(([x,z])=>{const w=new THREE.Mesh(gW,tire);w.rotation.z=Math.PI/2;w.position.set(x,.33,z);g.add(w)});
+    const tlm=new THREE.MeshBasicMaterial({color:0x551018});
+    [-.6,.6].forEach(x=>{const t=new THREE.Mesh(gL,tlm);t.position.set(x,.75,-2.16);g.add(t);const h=new THREE.Mesh(gL,hl);h.position.set(x,.65,2.16);g.add(h)});
+    g.traverse(o=>{if(o.isMesh)o.castShadow=Q.shadow});scene.add(g);
+    const lane=i%4,base=(lane<2?14:19)+rnd()*3,dd=d0+(i/(Q.low?5:8))*(d1-d0),x=lanes[lane]+RX+(rnd()-.5)*.8;
+    TRAF.push({g,body:b,cab:c,tlm,x,homeX:x,d:dd,d0,d1,v:base,base,home:dd,pv:base,hitT:0,cool:0,mass:1400,wreck:false,yaw:0,yawV:0,lv:0,crush:0,blink:0});
+  }
+}
+function resetTraffic(){
+  for(const t of TRAF){t.d=t.home;t.x=t.homeX;t.v=t.base;t.pv=t.base;t.hitT=0;t.cool=0;t.wreck=false;t.yaw=0;t.yawV=0;t.lv=0;t.crush=0;
+    t.body.scale.z=1;t.body.position.z=0;t.cab.rotation.set(0,0,0)}
+}
+function hitTraffic(t,tz){
+  const hw=PHYS.halfW||1.02,off=Math.max(0,(PHYS.halfL||2.45)-hw),sh=Math.sin(car.h),ch=Math.cos(car.h);
+  let best=null;
+  for(let i=0;i<3;i++){
+    const o=i===0?-off:i===1?0:off,wx=car.pos.x+sh*o,wz=car.pos.z+ch*o;
+    const dx=wx-t.x,dz=wz-tz,px=clamp(dx,-.9,.9),pz=clamp(dz,-2.15,2.15);
+    let nx=dx-px,nz=dz-pz,dist=Math.hypot(nx,nz),pen;
+    if(dist<1e-4){const ex=.9-Math.abs(dx),ez=2.15-Math.abs(dz);if(ex<ez){nx=dx>=0?1:-1;nz=0;pen=hw+ex}else{nx=0;nz=dz>=0?1:-1;pen=hw+ez}}
+    else{pen=hw-dist;if(pen<=0)continue;nx/=dist;nz/=dist}
+    car.pos.x+=nx*pen*.9;car.pos.z+=nz*pen*.9;
+    if(!best||pen>best.pen)best={wx,wz,nx,nz,pen};
+  }
+  if(!best)return;
+  const vn=car.vel.x*best.nx+(car.vel.z+t.v)*best.nz;   // traffic moves toward -z at t.v
+  if(vn>=-.25)return;
+  const mc=PHYS.mass,mt=t.mass,mu=mc*mt/(mc+mt),J=-vn*mu*1.15;
+  car.vel.x+=best.nx*J/mc;car.vel.z+=best.nz*J/mc;
+  t.v=Math.max(0,t.v+best.nz*J/mt);t.lv+=-best.nx*J/mt;t.hitT=2;
+  const rx=best.wx-car.pos.x,rz=best.wz-car.pos.z;car.yawRate+=(rz*best.nx-rx*best.nz)*J/(PHYS.izz||3200);
+  t.crush=Math.min(.4,t.crush+J/220000);
+  if(-vn>9&&!t.wreck){t.wreck=true;t.yawV=(rx*best.nz-rz*best.nx>0?1:-1)*(1+Math.random()*1.5)}   // a hard hit spins it out
+  if(t.cool<=0&&-vn>1.2){t.cool=.25;impactAt(best.wx,car.pos.y+.55,best.wz,best.nx,0,best.nz,-vn*clamp(Math.sqrt(mt/mc),.7,2.5),mt);statEl.textContent=t.wreck?'You wrecked a car!':'You hit a car!'}
+  car.speed=car.vLong=car.vel.x*sh+car.vel.z*ch;car.vLat=car.vel.x*ch-car.vel.z*sh;
+}
+function updateTraffic(dt){
+  updateSignals(dt);
+  const cx=camera.position.x,cz=camera.position.z,sl=Math.atan((RH-RE)/RL);
+  for(const t of TRAF){
+    let target=t.base;
+    if(t.hitT>0){t.hitT-=dt;target=0}
+    if(!t.wreck&&t.hitT<=0){   // keep a safe gap to the car ahead, and to you
+      for(const o of TRAF){if(o===t||Math.abs(o.x-t.x)>2.4)continue;const gap=o.d-t.d-4.5;if(gap>-1&&gap<60)target=Math.min(target,Math.max(0,o.v+(gap-7)*.7))}
+      if(inCar&&!RP.on&&Math.abs(car.pos.x-t.x)<2.6){const gap=(RZ-car.pos.z)-t.d-4.5;if(gap>-1&&gap<60)target=Math.min(target,Math.max(0,-car.vel.z+(gap-7)*.7))}
+    }
+    if(!t.wreck&&t.hitT<=0){   // obey the traffic lights: brake for a red (or a yellow it can still stop for) at the stop line
+      const zf=RZ-t.d-2.3;
+      for(let i=0;i<CITY.zw.length;i++){const dist=zf-(CITY.zw[i]+CITY.st/2+5),p=sigPhase(i);
+        if(p>0&&dist>-1&&dist<70&&(p===2||dist>t.v*t.v/12+4))target=Math.min(target,Math.sqrt(2*4*Math.max(0,dist-1.5)));}
+    }
+    t.v+=clamp(target-t.v,-9*dt,2.2*dt);                       // brakes harder than it accelerates
+    if(t.wreck){
+      t.v=Math.max(0,t.v-11*dt);t.yaw+=t.yawV*dt;t.yawV*=Math.exp(-1.2*dt);
+      t.x=clamp(t.x+t.lv*dt,RX-RW/2+1.2,RX+RW/2-1.2);t.lv*=Math.exp(-1.5*dt);
+    }
+    t.d+=t.v*dt;if(t.d>t.d1){t.d=t.d0;if(t.wreck){t.wreck=false;t.crush=0;t.yaw=0;t.body.scale.z=1}}
+    t.blink+=dt;
+    const braking=t.v<t.pv-.02;t.pv=t.v;
+    t.tlm.color.setHex(t.wreck?((t.blink%.8)<.4?0xff9a1e:0x2a1408):braking||t.hitT>0?0xff2030:0x551018);   // hazards on a wreck, bright when braking
+    const z=RZ-t.d,dx=t.x-cx,dz=z-cz;
+    if(dx*dx+dz*dz>490000){t.g.visible=false;continue}
+    t.g.visible=true;t.g.position.set(t.x,gh(t.x,z),z);t.g.rotation.set(sl,Math.PI+t.yaw,0);
+    t.body.scale.z=1-t.crush;t.cab.rotation.z=t.crush*.4;
+    if(t.cool>0)t.cool-=dt;
+    if(inCar&&!RP.on&&Math.abs(car.pos.y-t.g.position.y)<3&&Math.abs(car.pos.x-t.x)<8&&Math.abs(car.pos.z-z)<12)hitTraffic(t,z);
   }
 }

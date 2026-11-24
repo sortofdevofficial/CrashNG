@@ -164,7 +164,7 @@ function repairParts(){
     d.gone=false;d.acc=0;d.loose=0;if(d.onRepair)d.onRepair();
   }
   for(const x of debris)if(x.m.userData.shard&&x.m.parent)x.m.parent.remove(x.m);
-  debris.length=0;shardList.length=0;puddles.count=0;pudI=0;
+  debris.length=0;shardList.length=0;puddles.count=0;pudI=0;burnT=0;boomed=false;
 }
 
 // BeamNG-style crush: the shell is pushed in along the hit direction (deepest right behind the contact point, fading with
@@ -182,12 +182,13 @@ function dentAt(wx,wy,wz,nx,ny,nz,power,radius){
       const along=px*ax+py*ay+pz*az;if(along<-.45)continue;
       const pr2=px*px+py*py+pz*pz-along*along;if(pr2>=R2)continue;
       let w=1-Math.sqrt(pr2)/R;w*=w;
-      const amt=D*w*(along<0?1:Math.exp(-along/(R*1.4)));if(amt<.004)continue;
+      const st=e.mesh===bodyM?(Math.abs(C[i+2]+O[i+2])<.9?.62:1.2):1;   // stiff passenger cell, soft crumple zones at both ends
+      const amt=D*w*st*(along<0?1:Math.exp(-along/(R*1.4)));if(amt<.004)continue;
       const k=i/3,h1=hash(k),h2=hash(k+7.3),h3=hash(k+13.9);
       let dx=ax*amt+(h1-.5)*amt*.32,dy=ay*amt+(h2-.5)*amt*.32,dz=az*amt+(h3-.5)*amt*.32;
       if(longi){if(C[i+1]+O[i+1]>ly-.05)dy+=amt*.5*(h2+.2);dx-=Math.sign(C[i]+O[i])*amt*.12}
       let ox=O[i]+dx,oy=O[i+1]+dy,oz=O[i+2]+dz;
-      const m=Math.hypot(ox,oy,oz);if(m>1.5){const f=1.5/m;ox*=f;oy*=f;oz*=f}
+      const m=Math.hypot(ox,oy,oz);if(m>1.9){const f=1.9/m;ox*=f;oy*=f;oz*=f}
       O[i]=ox;O[i+1]=oy;O[i+2]=oz;touched=true;
       if(e.inv){v.set(C[i]+ox,C[i+1]+oy,C[i+2]+oz).applyMatrix4(e.inv);P[i]=v.x;P[i+1]=v.y;P[i+2]=v.z}
       else{P[i]=C[i]+ox;P[i+1]=C[i+1]+oy;P[i+2]=C[i+2]+oz}
@@ -250,7 +251,7 @@ function spawnSparks(wx,wy,wz,s){
   }
 }
 function impactAt(wx,wy,wz,nx,ny,nz,strength,mass){
-  const s=Math.min(40,Math.max(0,strength));
+  const s=Math.min(55,Math.max(0,strength));   // 55: a very fast wall hit crushes deeper than a 40 scrape
   if(s<3)return;
   const heavy=clamp((mass||220)/280,.03,1.7);
   const tough=clamp(1800/PHYS.mass*1.5,.3,1.6);   // light cars crumple, heavy vehicles shrug the hit off
@@ -260,7 +261,7 @@ function impactAt(wx,wy,wz,nx,ny,nz,strength,mass){
   if(Q.touch&&navigator.vibrate&&s>=6)navigator.vibrate(clamp(s*6,20,180));   // phone buzzes on a crash
   if(REC.on&&!REC.replay){audioThud(s);if(s>10)audioClank(s);}
   if(s>16)crash.slow=Math.max(crash.slow,.42);
-  const pw=clamp(s/30,.14,.95),rad=clamp(.9+heavy*.5,.9,1.9);
+  const pw=clamp(s/32,.12,1.1),rad=clamp(.9+heavy*.5,.9,1.9);
   dentAt(wx,wy,wz,nx,ny,nz,pw,rad);
   if(REC.on&&!REC.replay)REC.ev.push({t:REC.time,k:'dent',a:[wx,wy,wz,nx,ny,nz,pw,rad],s});
   const L=carLocalP(wx,wy,wz);
@@ -326,12 +327,16 @@ function updateLoose(dt){   // parts that are about to fall off sag and rattle (
     const m=d.mesh,L=d.loose,ph=d.name.length*1.7,side=d.zone==='left'?1:d.zone==='right'?-1:0;
     const sag=L*.28+Math.sin(tt*(14+ph)+ph)*L*sp*.18;
     _le.set(sag*(side?.4:1),0,side*L*.35+Math.sin(tt*11+ph)*L*sp*.1);
+    if(d.name==='hood')_le.x=-(L*.3+L*sp*1.2);                  // the wind peels a loose hood up
+    else if(side)_le.z=side*(L*.35+L*sp*.9);                      // loose doors swing open
     _lq.setFromEuler(_le);m.quaternion.copy(d.home.q).multiply(_lq);
     m.position.copy(d.home.p);m.position.y-=L*.05;
+    if(d.name==='hood'){m.position.y+=L*sp*.5;m.position.z-=L*sp*.35}else if(side)m.position.x+=side*L*sp*.2;
   }
 }
 const glassBit=new THREE.BoxGeometry(.09,.012,.07);
 function spawnGlass(p){   // a window or windscreen lets go: a spray of small glass pieces
+  if(typeof AUD!=='undefined'&&AUD.ctx)audioClank(30);
   for(let i=0;i<14;i++){
     const m=new THREE.Mesh(glassBit,glassM);m.userData.shard=true;
     m.position.set(p.x+(Math.random()-.5)*.6,p.y+(Math.random()-.5)*.3,p.z+(Math.random()-.5)*.6);
@@ -351,9 +356,54 @@ function addPuddle(x,z,col,size){
 }
 function crashFX(dt){   // radiator gone = steam; lost engine / fuel = oil, coolant or fuel trailing behind the car
   if(!inCar||RP.on)return;
+  {   // engine temperature: no radiator = it just keeps heating; at 140 C it starts to cook, at 165 C it seizes
+    const rg=PARTS['radiator'].gone;
+    car.et=clamp((car.et||90)+((rg?6.5:0)+crash.eng*4-(car.et-90)*.12*(rg?.05:1))*dt,90,170);
+    if(car.et>140){crash.eng=Math.min(1,crash.eng+.1*dt);if(!car.etMsg){car.etMsg=true;statEl.textContent='ENGINE OVERHEATING — it is losing power!'}}
+    else if(car.et<120)car.etMsg=false;
+  }
   const rad=PARTS['radiator'].gone,eng=PARTS['engine'].gone,fuel=PARTS['fuel cell'].gone||PARTS['diesel tank'].gone;
   if(!(rad||eng||fuel))return;
   if(rad){steamT-=dt;if(steamT<=0){steamT=.09;puff(car.pos.x+Math.sin(car.h)*((PHYS.zoneF||1.1)+.4),car.pos.y+.8,car.pos.z+Math.cos(car.h)*((PHYS.zoneF||1.1)+.4),1,1.0,1.6,0xe8f0f5)}}
   leakAcc+=(Math.abs(car.speed)+.6)*dt;
   if(leakAcc>1.1){leakAcc=0;addPuddle(car.pos.x-Math.sin(car.h)*.6+(Math.random()-.5)*.8,car.pos.z-Math.cos(car.h)*.6+(Math.random()-.5)*.8,fuel?0x6a4a12:rad?0x2fcf6a:0x14120f,.5+Math.random()*.7)}
+}
+
+// --- rollover: too much sideways speed on a grippy surface (or a hard blade hit) flips the car; the roof slams the road and caves in ---
+const FLIP={t:0,dur:1.3,dir:1,angle:0,hit:false};
+function startFlip(dir){
+  return;   // rollover removed
+  if(FLIP.t>0||!inCar||RP.on)return;
+  FLIP.t=FLIP.dur;FLIP.dir=dir||1;FLIP.hit=false;statEl.textContent='ROLLOVER!';
+}
+function updateFlip(dt){
+  if(FLIP.t<=0){FLIP.angle=0;return}
+  FLIP.t=Math.max(0,FLIP.t-dt);
+  const u=1-FLIP.t/FLIP.dur,e=u*u*(3-2*u);FLIP.angle=FLIP.dir*Math.PI*2*e;
+  car.vel.multiplyScalar(Math.exp(-1.5*dt));car.yawRate*=Math.exp(-1.2*dt);
+  if(!FLIP.hit&&u>.45){FLIP.hit=true;impactAt(car.pos.x,car.pos.y+1.15,car.pos.z,0,-1,0,22,300)}   // roof hits the ground: pushed down
+  crash.shake=Math.max(crash.shake,.12);
+}
+// --- fire: an engine fire that keeps burning cooks off the fuel; the blast throws parts everywhere ---
+let burnT=0,boomed=false;
+function explodeCar(){
+  const p=car.pos,y=p.y+.8;
+  crash.flash=.55;crash.shake=.6;crash.slow=.5;
+  spawnSparks(p.x,y,p.z,40);spawnSparks(p.x,y,p.z,40);
+  for(const d of detachParts){
+    if(d.gone||d.cond||(d.skin&&d.skin!==skin))continue;
+    if(!d.skin&&!d.mesh.userData.isWheel&&(skin==='truck'||skin==='ferrari'))continue;
+    if(Math.random()<.55)detachPart(d);
+  }
+  puff(p.x,y,p.z,14,2.5,6,0xff8a30);puff(p.x,y,p.z,12,2.2,6,0x222222);
+  if(typeof AUD!=='undefined'&&AUD.ctx){audioThud(60);audioClank(50)}
+  car.vel.multiplyScalar(.6);statEl.textContent='BOOM — the fuel cooked off!';
+}
+function crashBurn(dt){
+  if(!inCar||RP.on||boomed)return;
+  if(crash.eng>.9){
+    crash.dmg=Math.min(100,crash.dmg+1.5*dt);
+    burnT+=(PARTS['fuel cell'].gone||PARTS['diesel tank'].gone)?dt*1.6:dt*.6;   // a spilled tank burns much faster
+    if(burnT>9){boomed=true;explodeCar()}
+  }
 }

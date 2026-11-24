@@ -44,6 +44,10 @@ function audioInit(){
     const ag=ctx.createGain();ag.gain.value=0;
     ab.connect(af);af.connect(ag);ag.connect(master);ab.start();
     AUD.air=ag;
+    const wb=ctx.createBufferSource();wb.buffer=nb;wb.loop=true;   // wind: band-passed noise that rises with speed
+    const wf=ctx.createBiquadFilter();wf.type='bandpass';wf.frequency.value=700;wf.Q.value=.4;
+    const wg=ctx.createGain();wg.gain.value=0;wb.connect(wf);wf.connect(wg);wg.connect(master);wb.start();
+    AUD.wind=wg;AUD.windF=wf;
   }catch(e){AUD.ctx=null}
   return AUD.ctx;
 }
@@ -60,6 +64,7 @@ function audioUpdate(){
   const drift=live&&Math.abs(car.speed)>3&&(Math.abs(car.vLat)>4||car.wheelSlip>.1);
   AUD.skid.gain.setTargetAtTime(drift?.045:0,t,.05);
   AUD.horn.gain.setTargetAtTime(live&&(keys.KeyH||hornBtn)?.05:0,t,.02);
+  if(AUD.wind){const sp=Math.abs(car.speed);AUD.wind.gain.setTargetAtTime(live?clamp(sp/90,0,1)*.07:0,t,.1);AUD.windF.frequency.setTargetAtTime(400+sp*10,t,.1)}
   if(AUD.air)AUD.air.gain.setTargetAtTime(live&&truck&&(car.brake>.55||keys.Space)&&Math.abs(car.speed)>1?.022:0,t,.05);
 }
 let hornBtn=false;   // set by the HUD Horn button (see main.js); read by the horn gain above
@@ -155,13 +160,15 @@ function setTime(m){
   sun.intensity=night?.12:dusk?.9:1.35;sun.color.set(dusk?0xff9a55:0xfff2dc);
   hemi.intensity=night?.22:dusk?.42:.55;hemi.color.set(dusk?0xffd2a8:0xdfeeff);
   scene.background.set(night?0x050a12:dusk?0xf0a070:0x9cc9f2);
-  scene.fog.color.set(night?0x091322:dusk?0xf3b58c:0xcfe4f7);
+  scene.fog.color.set(night?0x091322:dusk?0xf3b58c:0xcfe4f7);FOGB.set(night?0x091322:dusk?0xf3b58c:0xcfe4f7);
   const U=skyDome.material.uniforms;
   U.cHor.value.set(dusk?0xffa763:0xe6f2ff);U.cTop.value.set(dusk?0x3a3f8f:0x1766e0);
   SUNOFF.set(dusk?90:50,dusk?26:80,40);U.sunDir.value.copy(SUNOFF).normalize();
   skyDome.visible=!night;stars.visible=night;
   scene.traverse(o=>{if(o.userData&&o.userData.cloud)o.visible=!night});
   underglow.material.opacity=night?.6:dusk?.25:0;
+  if(window.BLDM)BLDM.emissiveIntensity=night?.9:dusk?.35:0;   // city windows light up
+  MOUNT.color.set(night?0x0c1424:dusk?0x6a4f6e:0x5f7a9a);
   renderer.toneMappingExposure=night?.86:dusk?.95:.92;
   statEl.textContent=['Daytime','Sunset','Night — headlights on'][m]+' · N to change';
 }
@@ -207,3 +214,55 @@ addEventListener('keydown',e=>{
   else if(e.code==='KeyN')setTime((lights.time+1)%3);
   else if(e.code==='KeyM'){AUD.muted=!AUD.muted;if(AUD.master)AUD.master.gain.value=AUD.muted?0:.55;statEl.textContent=AUD.muted?'Audio muted':'Audio on'}
 });
+
+// --- weather: rain on the meadow, snow on the lake, dust in the desert, embers over the lava, drifting neon motes in the city ---
+const WXN=Q.low?350:1100,wxGeo=new THREE.BufferGeometry(),wxPos=new Float32Array(WXN*3);
+for(let i=0;i<WXN;i++){wxPos[i*3]=(Math.random()-.5)*90;wxPos[i*3+1]=(Math.random()-.5)*70;wxPos[i*3+2]=(Math.random()-.5)*90}
+wxGeo.setAttribute('position',new THREE.BufferAttribute(wxPos,3));
+const wxMat=new THREE.PointsMaterial({color:0xffffff,size:2,sizeAttenuation:false,transparent:true,opacity:0,depthWrite:false,fog:false});
+const wxPts=new THREE.Points(wxGeo,wxMat);wxPts.frustumCulled=false;wxPts.visible=false;scene.add(wxPts);
+const WXMODE=[{c:0xffffff,o:0,vy:-1,vx:0,sz:2},{c:0xffffff,o:.9,vy:-4,vx:2,sz:2.6},{c:0xbfd4ff,o:.35,vy:-32,vx:3,sz:1.5}];   // hills: clear, ice: snow, city: light rain
+let wxOp=0,wxCur=WXMODE[0];
+const wxWrap=(v,c,h)=>c+(((v-c+h)%(2*h))+2*h)%(2*h)-h;   // keep each particle inside a box around the camera
+function updateWeather(dt){
+  const cz=camera.position.z,q=zoneAt(cz),ai=q?Math.min(2,Math.floor((RZ-cz)/AL)):-1;
+  if(ai>=0)wxCur=WXMODE[ai];
+  wxOp+=((ai>=0?wxCur.o*(lights.time===2?.7:1):0)-wxOp)*Math.min(1,2*dt);
+  wxMat.opacity=wxOp;wxPts.visible=wxOp>.02;
+  if(!wxPts.visible)return;
+  wxMat.color.setHex(wxCur.c);wxMat.size=wxCur.sz;
+  const p=wxGeo.attributes.position.array,cx=camera.position.x,cy=camera.position.y;
+  for(let i=0;i<WXN;i++){
+    const k=i*3;
+    p[k]=wxWrap(p[k]+wxCur.vx*dt,cx,45);p[k+1]=wxWrap(p[k+1]+wxCur.vy*dt,cy,35);p[k+2]=wxWrap(p[k+2],cz,45);
+  }
+  wxGeo.attributes.position.needsUpdate=true;
+}
+
+// --- glow: light halos on the car, a moon at night, and a fog tint that changes with the area ---
+const FOGB=new THREE.Color(0xcfe4f7),_ft=new THREE.Color(),_ft2=new THREE.Color();
+const FOGTINT=[0xcfe4f7,0xdbeaff,0xb9bfd0];   // hills, ice, city
+const glowTex=(()=>{const c=document.createElement('canvas');c.width=c.height=64;const x=c.getContext('2d'),g=x.createRadialGradient(32,32,0,32,32,32);
+  g.addColorStop(0,'rgba(255,255,255,1)');g.addColorStop(.3,'rgba(255,255,255,.35)');g.addColorStop(1,'rgba(255,255,255,0)');x.fillStyle=g;x.fillRect(0,0,64,64);return new THREE.CanvasTexture(c)})();
+const haloHead=[],haloTail=[];
+[-1,1].forEach(sx=>{
+  const mk=(col,w,h,p,arr)=>{const s=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex,color:col,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,fog:false,opacity:0}));
+    s.scale.set(w,h,1);s.position.set(...p);carBody.add(s);arr.push(s)};
+  mk(0xfff1cf,1.7,1.7,[sx*.5,.52,2.45],haloHead);
+  mk(0xff2030,1.3,.9,[sx*.6,.7,-2.6],haloTail);
+});
+const moon=(()=>{const c=document.createElement('canvas');c.width=c.height=128;const x=c.getContext('2d');
+  const g=x.createRadialGradient(64,64,30,64,64,64);g.addColorStop(0,'rgba(230,240,255,.35)');g.addColorStop(1,'rgba(230,240,255,0)');x.fillStyle=g;x.fillRect(0,0,128,128);
+  x.fillStyle='#eef3fb';x.beginPath();x.arc(64,64,26,0,7);x.fill();x.fillStyle='rgba(150,165,190,.45)';
+  [[56,56,7],[72,70,5],[60,74,4]].forEach(([a,b,r])=>{x.beginPath();x.arc(a,b,r,0,7);x.fill()});
+  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),transparent:true,depthWrite:false,fog:false}));s.scale.set(260,260,1);s.visible=false;scene.add(s);return s})();
+const MOONDIR=new THREE.Vector3(-.45,.55,-.7).normalize();
+function updateGlow(dt){
+  const hv=lights.mode>0?(lights.time===2?.85:lights.time===1?.45:.18)*(lights.mode===2?1.3:1):0;
+  const br=clamp((tailM.emissiveIntensity-1.4)*.7,0,.9),tv=Math.max(lights.mode>0?.35:0,br);
+  haloHead.forEach(h=>h.material.opacity=hv);haloTail.forEach(h=>{h.material.opacity=tv;h.scale.x=1.3+br*.8});
+  moon.visible=lights.time===2;if(moon.visible)moon.position.copy(camera.position).addScaledVector(MOONDIR,2400);
+  const cz=camera.position.z,q=zoneAt(cz),ai=q?Math.min(2,Math.floor((RZ-cz)/AL)):-1;   // smooth fog tint per area
+  _ft2.copy(FOGB);if(ai>=0)_ft2.lerp(_ft.set(FOGTINT[ai]),lights.time===2?.15:.35);
+  scene.fog.color.lerp(_ft2,Math.min(1,2.5*dt));
+}
